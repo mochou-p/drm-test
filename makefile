@@ -6,10 +6,9 @@ PROGRAM       := drm_test
 SOURCE_DIR    := src
 BUILD_DIR     := bin
 MAIN          := $(SOURCE_DIR)/main.c
-TEST_FILE     := example.c
 EXECUTABLE    := $(BUILD_DIR)/$(PROGRAM)
 PREPARE       := mkdir -p $(BUILD_DIR)
-RUN           := $(EXECUTABLE) $(TEST_FILE)
+ARGS          := img/fuji.ppm
 
 COMPILER      := gcc
 COMPILE_FLAGS := -std=c99 -pedantic -O3 -g3 -Wall -Wextra -Wpedantic -Werror
@@ -33,7 +32,7 @@ check:
 	@$(CHECKER) $(CHECK_FLAGS) $(IGNORE_STDOUT)
 
 debug:
-	@$(DEBUGGER) $(DEBUG_FLAGS) $(RUN)
+	@$(DEBUGGER) $(DEBUG_FLAGS) $(EXECUTABLE) $(ARGS)
 
 all:
 	@$(MAKE) && $(MAKE) check && $(MAKE) debug
