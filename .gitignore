@@ -2,4 +2,5 @@
 
 bin/
 vgcore.*
+*.txt
 

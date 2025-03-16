@@ -10,9 +10,24 @@
 #include <sys/ioctl.h>
 #include <string.h>
 
+/*************************************************************************************************/
 
-static unsigned char *pixels;
+struct square {
+    uint32_t left;
+    uint32_t top;
+    uint32_t right;
+    uint32_t bottom;
+    uint32_t color;
+    uint32_t border;
+    uint32_t thickness;
+};
+
+/*************************************************************************************************/
+
+static unsigned char *wallpaper;
 static long          pixel_count;
+
+/*************************************************************************************************/
 
 int load_ppm(const char *filepath) {
     int exitcode = EXIT_FAILURE;
@@ -78,12 +93,12 @@ int load_ppm(const char *filepath) {
 
     fseek(file, start, SEEK_SET);
     long bytes = amount * sizeof(char);
-    pixels     = malloc(bytes);
-    if (NULL == pixels) {
+    wallpaper  = malloc(bytes);
+    if (NULL == wallpaper) {
         perror("malloc");
         goto close;
     }
-    if (0 == fread(pixels, sizeof(char), amount, file)) {
+    if (0 == fread(wallpaper, sizeof(char), amount, file)) {
         perror("fread");
         goto close;
     }
@@ -97,32 +112,42 @@ end:
     return exitcode;
 }
 
+/*************************************************************************************************/
+
 int main(int argc, char **argv) {
     int exitcode = EXIT_FAILURE;
 
-    // load image /////////////////////////////////////////////////////////////////////////////////
+    // validate args //////////////////////////////////////////////////////////////////////////////
 
     if (2 != argc) {
         printf("usage: drm_test <PATH_TO_PPM_IMAGE>\n");
         goto end;
     }
-    if (0 != load_ppm(argv[1])) {
-        printf("failed to load image\n");
+    const char *wallpaper_path = argv[1];
+    if (!access(wallpaper_path, F_OK)) {
+        printf("%s does not exist\n", wallpaper_path);
+        goto end;
+    }
+    if (!access(wallpaper_path, R_OK)) {
+        printf("%s cannot be read\n", wallpaper_path);
         goto end;
     }
 
     // open device ////////////////////////////////////////////////////////////////////////////////
 
-    int fd = open("/dev/dri/card1", O_RDWR);
+    int fd = open("/dev/dri/card0", O_RDWR);
     if (fd < 0) {
-        perror("open card0");
-        goto free_pix;
+        fd = open("/dev/dri/card1", O_RDWR);
+        if (fd < 0) {
+            perror("open card0/card1");
+            goto end;
+        }
     }
 
     // permissions ////////////////////////////////////////////////////////////////////////////////
 
     if (drmSetMaster(fd) < 0) {
-        perror("drmSetMaster");
+        printf("you need to run this from tty\n");
         goto close;
     }
 
@@ -130,7 +155,7 @@ int main(int argc, char **argv) {
 
     drmModeRes *resources = drmModeGetResources(fd);
     if (!resources) {
-        perror("drmModeGetResources\n\n\n");
+        perror("drmModeGetResources");
         goto deop;
     }
 
@@ -229,38 +254,74 @@ int main(int argc, char **argv) {
         goto unmap_buf;
     }
 
-    // draw image /////////////////////////////////////////////////////////////////////////////////
+    // load wallpaper /////////////////////////////////////////////////////////////////////////////
 
-    uint32_t color;
-    for (uint32_t y = 0; y < height; ++y) {
-        for (uint32_t x = 0; x < width; ++x) {
-            uint32_t i = y * width + x;
+    if (0 != load_ppm(wallpaper_path+3)) { // FIXME: temp +3 to ignore "../" from `make debug`
+        printf("failed to load image\n");
+        goto unmap_buf;
+    }
 
-            if (i < pixel_count) {
-                color = 0xFF000000         // A
-                    + (pixels[i*3] << 16)  // R
-                    + (pixels[i*3+1] << 8) // G
-                    + pixels[i*3+2];       // B
-            } else {
-                color = 0xFF8C53DB;
+    // draw ///////////////////////////////////////////////////////////////////////////////////////
+
+    const struct square squares[2] = {
+        {100, 100, 400, 200, 0xFF000000, 0xFFFFFFFF, 20},
+        {150,  50, 175, 600, 0xFFFF0000, 0xFFFFFF00, 10}
+    };
+    const uint32_t n_squares = sizeof(squares) / sizeof(struct square);
+
+    uint32_t color, i, x, y;
+    uint32_t *framebuffer = (uint32_t *) buffer;
+    uint32_t n_pixels     = width * height;
+    for (i = 0; i < n_pixels; ++i) {
+        x = i % width;
+        y = i / width;
+
+        // wallpaper
+        color = 0xFF000000             // A
+            + (wallpaper[i*3  ] << 16) // R
+            + (wallpaper[i*3+1] <<  8) // G
+            +  wallpaper[i*3+2];       // B
+
+        // squares
+        for (uint32_t s = 0; s < n_squares; ++s) {
+            if (
+                x >= squares[s].left   &&
+                x <= squares[s].right  &&
+                y >= squares[s].top    &&
+                y <= squares[s].bottom
+            ) {
+                if (
+                    x >= squares[s].left   + squares[s].thickness &&
+                    x <= squares[s].right  - squares[s].thickness &&
+                    y >= squares[s].top    + squares[s].thickness &&
+                    y <= squares[s].bottom - squares[s].thickness
+                ) {
+                    color = squares[s].border;
+                } else {
+                    color = squares[s].color;
+                }
+                break;
             }
-
-            ((uint32_t *) buffer)[i] = color;
         }
+
+        framebuffer[i] = color;
     }
 
     // present ////////////////////////////////////////////////////////////////////////////////////
 
     if (drmModeSetCrtc(fd, crtc_id, fb, 0, 0, &connector->connector_id, 1, &mode)) {
         perror("drmModeSetCrtc");
-        goto unmap_buf;
+        goto free_wall;
     }
-
     sleep(3);
 
     // cleanup ////////////////////////////////////////////////////////////////////////////////////
 
+    // FIXME: properly free unmapped framebuffer?
+
     exitcode = EXIT_SUCCESS;
+free_wall:
+    free(wallpaper);
 unmap_buf:
     munmap(buffer, create_dumb.size);
 free_buf:
@@ -277,8 +338,6 @@ deop:
     drmDropMaster(fd);
 close:
     close(fd);
-free_pix:
-    free(pixels);
 end:
     return exitcode;
 }
