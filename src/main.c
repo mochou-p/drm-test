@@ -14,6 +14,10 @@
 
 /*************************************************************************************************/
 
+#define ASCII_NUMBER_OFFSET (48)
+
+/*************************************************************************************************/
+
 struct square {
     uint32_t left;
     uint32_t top;
@@ -65,14 +69,19 @@ int main(int argc, char **argv) {
 
     // open device ////////////////////////////////////////////////////////////////////////////////
 
-    // | O_NONBLOCK?
-    int fd = open("/dev/dri/card0", O_RDWR);
-    if (0 > fd) {
-        fd = open("/dev/dri/card1", O_RDWR);
-        if (0 > fd) {
-            perror("open card0/card1");
-            goto end;
+    char          gpu[]     = "/dev/dri/cardX";
+    unsigned long last_char = strlen(gpu) - 1;
+    int           fd        = -1;
+    for (char i = 0; i < 8; ++i) {
+        gpu[last_char] = i + ASCII_NUMBER_OFFSET;
+        fd = open(gpu, O_RDWR); // | O_NONBLOCK
+        if (0 <= fd) {
+            break;
         }
+    }
+    if (0 > fd) {
+        printf("could not open /dev/dri/cardX (0..7)\n");
+        goto end;
     }
 
     // permissions ////////////////////////////////////////////////////////////////////////////////
@@ -194,7 +203,7 @@ int main(int argc, char **argv) {
     // draw ///////////////////////////////////////////////////////////////////////////////////////
 
     // colors are ARGB
-    const struct square squares[2] = {
+    const struct square squares[] = {
         {100, 100, 400, 200, 0xFF000000, 0xFFFFFFFF, 20},
         {150,  50, 175, 600, 0xFFFF0000, 0xFFFFFF00, 10}
     };
@@ -276,7 +285,7 @@ void *mouse_handler(void *arg) {
 
     int fd = open("/dev/input/mice", O_RDONLY);
     if (fd < 0) {
-        perror("open mice");
+        perror("open /dev/input/mice");
         goto end;
     }
 
