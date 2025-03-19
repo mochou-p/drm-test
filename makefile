@@ -11,7 +11,7 @@ PREPARE       := mkdir -p $(BUILD_DIR)
 ARGS          := ../img/fuji.ppm
 
 COMPILER      := gcc
-COMPILE_FLAGS := -std=c99 -pedantic -O3 -g3 -Wall -Wextra -Wpedantic -Werror
+COMPILE_FLAGS := -std=c99 -pedantic -O3 -g3 -Wall -Wextra -Wpedantic -Wconversion -Werror
 INCLUDES      := -I/nix/store/xjvnswjz32dw12ld8nb29lhwp92275aj-libdrm-2.4.120-dev/include/libdrm
 LINKS         := -ldrm
 
@@ -32,7 +32,7 @@ check:
 	@$(CHECKER) $(CHECK_FLAGS) $(IGNORE_STDOUT)
 
 debug:
-	@$(DEBUGGER) $(DEBUG_FLAGS) $(EXECUTABLE) $(ARGS)
+	@sudo $(DEBUGGER) $(DEBUG_FLAGS) $(EXECUTABLE) $(ARGS)
 
 all:
 	@$(MAKE) && $(MAKE) check && $(MAKE) debug
