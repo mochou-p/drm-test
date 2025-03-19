@@ -18,6 +18,7 @@
 
 /*************************************************************************************************/
 
+/*
 struct square {
     uint32_t left;
     uint32_t top;
@@ -27,29 +28,28 @@ struct square {
     uint32_t border;
     uint32_t thickness;
 };
+*/
 
 /*************************************************************************************************/
 
 unsigned char *load_ppm(const char *, uint32_t *, uint32_t *);
 
-// void *mouse_handler(void *);
+void *mouse_handler(void *);
 
 /*************************************************************************************************/
 
-// static atomic_bool exiting = false;
+static atomic_bool running = true;
+
+static atomic_uint mouse_x = 1920 / 2;
+static atomic_uint mouse_y = 1080 / 2;
 
 /*************************************************************************************************/
 
 int main(int argc, char **argv) {
     int exitcode = EXIT_FAILURE;
 
-    /*
-    printf("%d\n", atomic_load(&exiting));
     pthread_t mouse_thread;
     pthread_create(&mouse_thread, NULL, mouse_handler, NULL);
-    pthread_join(mouse_thread, NULL);
-    printf("%d\n", atomic_load(&exiting));
-    */
 
     // validate args //////////////////////////////////////////////////////////////////////////////
 
@@ -67,7 +67,7 @@ int main(int argc, char **argv) {
         goto end;
     }
 
-    // open device ////////////////////////////////////////////////////////////////////////////////
+    // open cardX /////////////////////////////////////////////////////////////////////////////////
 
     char          gpu[]     = "/dev/dri/cardX";
     unsigned long last_char = strlen(gpu) - 1;
@@ -200,59 +200,36 @@ int main(int argc, char **argv) {
         goto free_wall;
     }
 
-    // draw ///////////////////////////////////////////////////////////////////////////////////////
+    // main loop //////////////////////////////////////////////////////////////////////////////////
 
+    /*
     // colors are ARGB
     const struct square squares[] = {
         {100, 100, 400, 200, 0xFF000000, 0xFFFFFFFF, 20},
         {150,  50, 175, 600, 0xFFFF0000, 0xFFFFFF00, 10}
     };
     const uint32_t n_squares = sizeof(squares) / sizeof(struct square);
+    */
 
-    uint32_t color, i, x, y;
+    uint32_t i, x, y;
     uint32_t *framebuffer = (uint32_t *) buffer;
-    for (i = 0; i < pixel_count; ++i) {
-        x = i % width;
-        y = i / width;
 
-        // wallpaper
-        color = 0xFF000000             // A
-            + (wallpaper[i*3  ] << 16) // R
-            + (wallpaper[i*3+1] <<  8) // G
-            +  wallpaper[i*3+2];       // B
+    while (atomic_load(&running)) {
+        // draw -----------------------------------------------------------------------------------
 
-        // squares
-        for (uint32_t s = 0; s < n_squares; ++s) {
-            if (
-                x >= squares[s].left   &&
-                x <= squares[s].right  &&
-                y >= squares[s].top    &&
-                y <= squares[s].bottom
-            ) {
-                if (
-                    x >= squares[s].left   + squares[s].thickness &&
-                    x <= squares[s].right  - squares[s].thickness &&
-                    y >= squares[s].top    + squares[s].thickness &&
-                    y <= squares[s].bottom - squares[s].thickness
-                ) {
-                    color = squares[s].border;
-                } else {
-                    color = squares[s].color;
-                }
-                break;
-            }
+        x = atomic_load(&mouse_x);
+        y = atomic_load(&mouse_y);
+        i = y * width + x;
+
+        framebuffer[i] = 0xFFFFFFFF;
+
+        // present --------------------------------------------------------------------------------
+
+        if (0 != drmModeSetCrtc(fd, crtc_id, fb, 0, 0, &connector->connector_id, 1, &mode)) {
+            perror("drmModeSetCrtc");
+            goto free_wall;
         }
-
-        framebuffer[i] = color;
     }
-
-    // present ////////////////////////////////////////////////////////////////////////////////////
-
-    if (0 != drmModeSetCrtc(fd, crtc_id, fb, 0, 0, &connector->connector_id, 1, &mode)) {
-        perror("drmModeSetCrtc");
-        goto free_wall;
-    }
-    sleep(3);
 
     // cleanup ////////////////////////////////////////////////////////////////////////////////////
 
@@ -272,12 +249,12 @@ deop:
 close:
     close(fd);
 end:
+    pthread_join(mouse_thread, NULL);
     return exitcode;
 }
 
 /*************************************************************************************************/
 
-/*
 void *mouse_handler(void *arg) {
     (void) arg;
 
@@ -289,40 +266,46 @@ void *mouse_handler(void *arg) {
         goto end;
     }
 
-    bool    fix_mouse[3] = {0,0,0};
-    uint8_t      data[3] = {0,0,0};
-    for (int i = 0; i < 32; ++i) {
-        ssize_t bytes = read(fd, data, sizeof(data));
+    unsigned char data[3];
+    // cppcheck-suppress variableScope
+    ssize_t       bytes;
+    // cppcheck-suppress variableScope
+    int           dx;
+    // cppcheck-suppress variableScope
+    int           dy;
+    // cppcheck-suppress variableScope
+    int           new_x;
+    // cppcheck-suppress variableScope
+    int           new_y;
+    int           x = 1920 / 2;
+    int           y = 1080 / 2;
+    for (int i = 0; i < 500; ++i) {
+        bytes = read(fd, data, sizeof(data));
         if (bytes < 0) {
             perror("read mice");
             break;
         }
 
-        if (!(fix_mouse[0] && fix_mouse[1] && fix_mouse[2])) {
-            if (data[0] & 1) { fix_mouse[0] = true; }
-            if (data[0] & 2) { fix_mouse[1] = true; }
-            if (data[0] & 4) { fix_mouse[2] = true; }
-
-            continue;
+        dx    = (int) (char) data[1];
+        new_x = x + dx;
+        if (new_x >= 0 && new_x < 1920) {
+            x = new_x;
+            atomic_store(&mouse_x, (unsigned int) x);
         }
 
-        int8_t dx = data[1];
-        int8_t dy = data[2];
-
-        if (dx != 0) {
-            if
+        dy    = (int) (char) data[2];
+        new_y = y - dy;
+        if (new_y >= 0 && new_y < 1080) {
+            y = new_y;
+            atomic_store(&mouse_y, (unsigned int) y);
         }
-
-        printf("dx=%d ; dy=%d\n", dx, dy);
     }
-
-    atomic_store(&exiting, true);
 
     close(fd);
 end:
+    atomic_store(&running, false);
     return NULL;
 }
-*/
 
 /*************************************************************************************************/
 
