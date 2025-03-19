@@ -9,6 +9,8 @@ MAKEFLAGS += --no-print-directory
 PROGRAM            := drm_test
 SOURCE_DIR         := src
 BUILD_DIR          := bin
+# vvv CHANGE THIS vvv
+DRM_DIR            := /nix/store/xjvnswjz32dw12ld8nb29lhwp92275aj-libdrm-2.4.120-dev
 MAIN_C             := $(SOURCE_DIR)/main.c
 RELEASE_EXECUTABLE := $(BUILD_DIR)/$(PROGRAM)
 DEV_EXECUTABLE     := $(RELEASE_EXECUTABLE)_dev
@@ -16,10 +18,11 @@ ARGS               := ../img/fuji.ppm
 
 # compilation
 
-GCC_RELEASE_FLAGS := -std=c99 -O3 -DNDEBUG -march=native -fwhole-program -flto
-GCC_DEV_FLAGS     := -std=c99 -pedantic -O1 -g3 -Wall -Wextra -Wpedantic -Wconversion -Werror
-HEADERS           := -I/nix/store/xjvnswjz32dw12ld8nb29lhwp92275aj-libdrm-2.4.120-dev/include/libdrm
-LIBRARIES         := -ldrm
+COMPILER      := gcc
+RELEASE_FLAGS := -std=c99 -O3 -DNDEBUG -march=native -fwhole-program -flto
+DEV_FLAGS     := -std=c99 -pedantic -g3 -Wall -Wextra -Wpedantic -Wconversion -Werror
+HEADERS       := -I$(DRM_DIR)/include/libdrm
+LIBRARIES     := -ldrm
 
 # tools
 
@@ -37,7 +40,7 @@ IGNORE_MAKE_ERR := || true
 
 TARGET:
 	@$(PREPARE)
-	@gcc $(GCC_RELEASE_FLAGS) $(HEADERS) $(MAIN_C) -o $(RELEASE_EXECUTABLE) $(LIBRARIES)
+	@$(COMPILER) $(RELEASE_FLAGS) $(HEADERS) $(MAIN_C) -o $(RELEASE_EXECUTABLE) $(LIBRARIES)
 
 run:
 	@sudo $(RELEASE_EXECUTABLE) $(ARGS) $(IGNORE_MAKE_ERR)
@@ -54,7 +57,10 @@ static_analysis:
 
 dev:
 	@$(PREPARE)
-	@gcc $(GCC_DEV_FLAGS) $(HEADERS) $(MAIN_C) -o $(DEV_EXECUTABLE) $(LIBRARIES)
+	@$(COMPILER) $(DEV_FLAGS) $(HEADERS) $(MAIN_C) -o $(DEV_EXECUTABLE) $(LIBRARIES)
+
+run_dev:
+	@sudo $(DEV_EXECUTABLE) $(ARGS) $(IGNORE_MAKE_ERR)
 
 memory_check:
 	@sudo valgrind $(VALGRIND_FLAGS) $(DEV_EXECUTABLE) $(ARGS) $(IGNORE_MAKE_ERR)

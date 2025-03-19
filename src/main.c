@@ -18,17 +18,13 @@
 
 /*************************************************************************************************/
 
-/*
-struct square {
-    uint32_t left;
-    uint32_t top;
-    uint32_t right;
-    uint32_t bottom;
-    uint32_t color;
-    uint32_t border;
-    uint32_t thickness;
+struct mouse_arg {
+    atomic_bool  *running;
+    atomic_uint  *mouse_x;
+    atomic_uint  *mouse_y;
+    int          width;
+    int          height;
 };
-*/
 
 /*************************************************************************************************/
 
@@ -38,18 +34,8 @@ void *mouse_handler(void *);
 
 /*************************************************************************************************/
 
-static atomic_bool running = true;
-
-static atomic_uint mouse_x = 1920 / 2;
-static atomic_uint mouse_y = 1080 / 2;
-
-/*************************************************************************************************/
-
 int main(int argc, char **argv) {
     int exitcode = EXIT_FAILURE;
-
-    pthread_t mouse_thread;
-    pthread_create(&mouse_thread, NULL, mouse_handler, NULL);
 
     // validate args //////////////////////////////////////////////////////////////////////////////
 
@@ -200,16 +186,18 @@ int main(int argc, char **argv) {
         goto free_wall;
     }
 
-    // main loop //////////////////////////////////////////////////////////////////////////////////
+    // mouse handling /////////////////////////////////////////////////////////////////////////////
 
-    /*
-    // colors are ARGB
-    const struct square squares[] = {
-        {100, 100, 400, 200, 0xFF000000, 0xFFFFFFFF, 20},
-        {150,  50, 175, 600, 0xFFFF0000, 0xFFFFFF00, 10}
-    };
-    const uint32_t n_squares = sizeof(squares) / sizeof(struct square);
-    */
+    atomic_bool running = true;
+    atomic_uint mouse_x = width  / 2;
+    atomic_uint mouse_y = height / 2;
+
+    struct mouse_arg m_arg = { &running, &mouse_x, &mouse_y, (int) width, (int) height };
+
+    pthread_t mouse_thread;
+    pthread_create(&mouse_thread, NULL, mouse_handler, (void *) &m_arg);
+
+    // main loop //////////////////////////////////////////////////////////////////////////////////
 
     uint32_t i, x, y;
     uint32_t *framebuffer = (uint32_t *) buffer;
@@ -227,18 +215,21 @@ int main(int argc, char **argv) {
 
         if (0 != drmModeSetCrtc(fd, crtc_id, fb, 0, 0, &connector->connector_id, 1, &mode)) {
             perror("drmModeSetCrtc");
-            goto free_wall;
+            goto join_mouse;
         }
     }
 
     // cleanup ////////////////////////////////////////////////////////////////////////////////////
 
     exitcode = EXIT_SUCCESS;
+join_mouse:
+    pthread_join(mouse_thread, NULL);
 free_wall:
     free(wallpaper);
 unmap_buf:
     munmap(buffer, c_dumb.size);
 free_con:
+    // FIXME: refactor to avoid `if`
     if (NULL != connector) {
         drmModeFreeConnector(connector);
     }
@@ -249,14 +240,13 @@ deop:
 close:
     close(fd);
 end:
-    pthread_join(mouse_thread, NULL);
     return exitcode;
 }
 
 /*************************************************************************************************/
 
-void *mouse_handler(void *arg) {
-    (void) arg;
+void *mouse_handler(void *m_arg) {
+    struct mouse_arg *arg = (struct mouse_arg *) m_arg;
 
     // open mice //////////////////////////////////////////////////////////////////////////////////
 
@@ -270,15 +260,9 @@ void *mouse_handler(void *arg) {
     // cppcheck-suppress variableScope
     ssize_t       bytes;
     // cppcheck-suppress variableScope
-    int           dx;
-    // cppcheck-suppress variableScope
-    int           dy;
-    // cppcheck-suppress variableScope
-    int           new_x;
-    // cppcheck-suppress variableScope
-    int           new_y;
-    int           x = 1920 / 2;
-    int           y = 1080 / 2;
+    int           dx, dy, new_x, new_y;
+    int           x = arg->width  / 2;
+    int           y = arg->height / 2;
     for (int i = 0; i < 500; ++i) {
         bytes = read(fd, data, sizeof(data));
         if (bytes < 0) {
@@ -290,20 +274,20 @@ void *mouse_handler(void *arg) {
         new_x = x + dx;
         if (new_x >= 0 && new_x < 1920) {
             x = new_x;
-            atomic_store(&mouse_x, (unsigned int) x);
+            atomic_store(arg->mouse_x, (unsigned int) x);
         }
 
         dy    = (int) (char) data[2];
         new_y = y - dy;
         if (new_y >= 0 && new_y < 1080) {
             y = new_y;
-            atomic_store(&mouse_y, (unsigned int) y);
+            atomic_store(arg->mouse_y, (unsigned int) y);
         }
     }
 
     close(fd);
 end:
-    atomic_store(&running, false);
+    atomic_store(arg->running, false);
     return NULL;
 }
 
